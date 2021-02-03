@@ -47,10 +47,10 @@ func main() {
 
 	tr := &http.Transport{
 		MaxIdleConns:    256,
-		IdleConnTimeout: 5 * time.Second,
+		IdleConnTimeout: 10 * time.Second,
 		DialContext: (&net.Dialer{
-			Timeout:   1 * time.Second,
-			KeepAlive: 1 * time.Second,
+			Timeout:   5 * time.Second,
+			KeepAlive: 5 * time.Second,
 			DualStack: true}).DialContext,
 	}
 	client := &http.Client{Transport: tr}
@@ -105,6 +105,7 @@ func requestShellyStatus(client *http.Client, ip net.IP, login string, password 
 	if err != nil {
 		return
 	}
+
 	req.SetBasicAuth(login, password)
 	resp, err := client.Do(req)
 
@@ -113,7 +114,7 @@ func requestShellyStatus(client *http.Client, ip net.IP, login string, password 
 	}
 
 	myShellyStatus.respHttpStatus = resp.StatusCode
-
+	fmt.Printf("%v : %v\n", ip, resp.StatusCode)
 	if resp.StatusCode == 401 {
 		return
 	}
