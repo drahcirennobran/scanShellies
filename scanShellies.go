@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"sort"
@@ -13,6 +14,11 @@ import (
 	"strings"
 	"time"
 )
+
+type mqttStruct struct {
+	Enable bool   `enable`
+	Id     string `json:"id"`
+}
 
 type shelly struct {
 	ip             net.IP
@@ -33,24 +39,41 @@ type shellyStatus struct {
 }
 
 type shellySettings struct {
-	Name string `json:"name"`
+	Name string     `json:"name"`
+	Mqtt mqttStruct `json:"mqtt"`
 }
 
 func main() {
-	login := flag.String("login", "", "login")
-	password := flag.String("password", "", "password")
-	upgrade := flag.Bool("upgrade", false, "launch upgrade")
+	login := flag.String("login", "", "shelly login")
+	password := flag.String("password", "", "shelly password")
+	upgrade := flag.Bool("upgrade", false, "true to launch upgrade")
+	network := flag.String("network", "192.168.0.*", "C class network to scan, 3 bytes only, * mandatory for last byte. example 192.168.0.*")
+
 	flag.Parse()
-	fmt.Println(*login)
-	fmt.Println(*password)
-	fmt.Println(*upgrade)
+	networkIP := strings.Split(*network, ".")
+	if len(networkIP) != 4 || networkIP[3] != "*" {
+		log.Fatal("ip bad format, enter something like -network=\"192.168.0.*\"")
+	}
+
+	a, err := strconv.Atoi(networkIP[0])
+	if err != nil {
+		log.Fatal("ip bad format, enter something like -network=\"192.168.0.*\"")
+	}
+	b, err := strconv.Atoi(networkIP[1])
+	if err != nil {
+		log.Fatal("ip bad format, enter something like -network=\"192.168.0.*\"")
+	}
+	c, err := strconv.Atoi(networkIP[2])
+	if err != nil {
+		log.Fatal("ip bad format, enter something like -network=\"192.168.0.*\"")
+	}
 
 	tr := &http.Transport{
 		MaxIdleConns:    256,
-		IdleConnTimeout: 10 * time.Second,
+		IdleConnTimeout: 1 * time.Second,
 		DialContext: (&net.Dialer{
-			Timeout:   5 * time.Second,
-			KeepAlive: 5 * time.Second,
+			Timeout:   10 * time.Second,
+			KeepAlive: 1 * time.Second,
 			DualStack: true}).DialContext,
 	}
 	client := &http.Client{Transport: tr}
@@ -58,10 +81,13 @@ func main() {
 	shellyChan := make(chan shelly, 256)
 	fmt.Println("Scanning network...")
 	for i := 2; i < 255; i++ {
-		go scanShelly(net.IPv4(192, 168, 0, byte(i)), client, *login, *password, shellyChan)
+		ip := net.IPv4(byte(a), byte(b), byte(c), byte(i))
+		go scanShelly(ip, client, *login, *password, shellyChan)
 	}
-	time.Sleep(5 * time.Second)
+	time.Sleep(7 * time.Second)
 	close(shellyChan)
+	fmt.Printf("found %v shellies\n", len(shellyChan))
+
 	showAndUpdateShellies(client, getSortedChan(shellyChan), *upgrade)
 }
 
@@ -77,7 +103,7 @@ func scanShelly(ip net.IP, client *http.Client, login string, password string, s
 }
 
 func showAndUpdateShellies(client *http.Client, c chan shelly, update bool) {
-	fmt.Println("ip        \tMac            \tRSSI\tstatus   \tHTTP\tname")
+	fmt.Println("ip               mqtt.id                         mqtt enable  RSSI  status            HTTP  name")
 
 	for s := range c {
 		hasUpdateText := "Up to date"
@@ -89,13 +115,18 @@ func showAndUpdateShellies(client *http.Client, c chan shelly, update bool) {
 				hasUpdateText = "update available"
 			}
 		}
-		fmt.Printf("%v\t%v\t%v\t%v\t%v\t%v\n",
-			s.ip,
-			s.shellyStatus.Mac,
-			s.shellyStatus.WifiSta.RSSI,
-			hasUpdateText,
-			s.shellyStatus.respHttpStatus,
-			s.shellySettings.Name)
+		mqttEnable := "false        "
+		if s.shellySettings.Mqtt.Enable == true {
+			mqttEnable = "true         "
+		}
+		fmt.Printf("%v%v%v%v%v%v%v\n",
+			rpad(fmt.Sprintf("%v", s.ip), " ", 17),
+			rpad(s.shellySettings.Mqtt.Id, " ", 32),
+			mqttEnable,
+			rpad(fmt.Sprintf("%v", s.shellyStatus.WifiSta.RSSI), " ", 6),
+			rpad(hasUpdateText, " ", 18),
+			rpad(fmt.Sprintf("%v", s.shellyStatus.respHttpStatus), " ", 6),
+			rpad(s.shellySettings.Name, " ", 30))
 	}
 }
 
@@ -114,7 +145,6 @@ func requestShellyStatus(client *http.Client, ip net.IP, login string, password 
 	}
 
 	myShellyStatus.respHttpStatus = resp.StatusCode
-	fmt.Printf("%v : %v\n", ip, resp.StatusCode)
 	if resp.StatusCode == 401 {
 		return
 	}
@@ -130,7 +160,7 @@ func requestShellyStatus(client *http.Client, ip net.IP, login string, password 
 }
 
 func requestShellySettings(client *http.Client, ip net.IP, login string, password string) (myShellySettings *shellySettings) {
-	myShellySettings = &shellySettings{"unknow"}
+	myShellySettings = &shellySettings{"unknow", mqttStruct{false, "unknow"}}
 	req, err := http.NewRequest("GET", "http://"+ip.String()+"/settings", nil)
 	if err != nil {
 		return
@@ -176,4 +206,11 @@ func getSortedChan(c chan shelly) chan shelly {
 	close(result)
 
 	return result
+}
+
+func rpad(s string, pad string, plength int) string {
+	for i := len(s); i < plength; i++ {
+		s = s + pad
+	}
+	return s
 }
