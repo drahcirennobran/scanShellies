@@ -47,7 +47,7 @@ func main() {
 	login := flag.String("login", "", "shelly login")
 	password := flag.String("password", "", "shelly password")
 	upgrade := flag.Bool("upgrade", false, "true to launch upgrade")
-	network := flag.String("network", "192.168.0.*", "C class network to scan, 3 bytes only, * mandatory for last byte. example 192.168.0.*")
+	network := flag.String("network", "192.168.0.*", "C class network to scan, 3 bytes only, * mandatory for last byte. example \"192.168.0.*\"")
 
 	flag.Parse()
 	networkIP := strings.Split(*network, ".")
